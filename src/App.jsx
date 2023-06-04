@@ -6,101 +6,47 @@ import Button from "./components/Button";
 import ModeSelect from "./components/ModeSelect";
 import SettingsDialog from "./components/SettingsDialog/SettingsDialog";
 import TimeView from "./components/TimeView";
+import {
+  defAlarmSound,
+  defLongBreakMins,
+  defPomodoroMins,
+  defShortBreakMins,
+  runningStateFinished,
+  runningStatePaused,
+  runningStateRunning,
+} from "./constants";
+import { useTimer } from "./hooks/useTimer";
 
 function App() {
-  const oneMin = 60 * 1000;
-  const defPomodoroMins = 25;
-  const defShortBreakMins = 5;
-  const defLongBreakMins = 10;
-  const defAlarmSound = "alarmclock";
-
   const [settings, setSettings] = useState({
     pomodoro: defPomodoroMins,
     shortBreak: defShortBreakMins,
     longBreak: defLongBreakMins,
     alarmSound: defAlarmSound,
   });
+  const [needReloadingPomodoro, setNeedReloadingPomodoro] = useState(false);
 
   const [mode, setMode] = useState(0);
-  const runningStateRunning = 0;
-  const runningStatePaused = 1;
-  const runningStateFinished = 2;
-  const [now, setNow] = useState(Date.now());
-  const [timeState, setTimeState] = useState({
-    id: 0,
-    runningState: runningStatePaused,
-    pauseTime: now,
-    endTime: now + settings.pomodoro * oneMin,
-  });
-
   const [dialogOpen, setDialogOpen] = useState(false);
-
-  function setDateNow() {
-    const dateNow = Date.now();
-    setNow(dateNow);
-    return dateNow;
-  }
+  const { now, timeState, reloadPomodoro, start, stop, reset } = useTimer(
+    settings.pomodoro
+  );
 
   function handleStart() {
-    setTimeState((s) => {
-      if (s.runningState === runningStatePaused) {
-        const dateNow = setDateNow();
-        const pausePeriod = dateNow - s.pauseTime;
-        return {
-          ...s,
-          pauseTime: 0,
-          runningState: runningStateRunning,
-          endTime: s.endTime + pausePeriod,
-        };
-      } else {
-        return s;
-      }
-    });
+    start();
   }
 
   function handleStop() {
-    setTimeState((s) => {
-      if (s.runningState === runningStateRunning) {
-        const dateNow = setDateNow();
-        return {
-          ...s,
-          runningState: runningStatePaused,
-          pauseTime: dateNow,
-        };
-      } else {
-        return s;
-      }
-    });
-  }
-
-  function reset(mode, runningState) {
-    const dateNow = setDateNow();
-    setTimeState((s) => ({
-      id: s.id + 1,
-      runningState: runningState,
-      pauseTime: runningState === runningStatePaused ? dateNow : 0,
-      endTime: dateNow + getTimeFromMode(mode, settings),
-    }));
+    stop();
   }
 
   function handleReset() {
-    reset(mode, runningStatePaused);
+    reset(mode, runningStatePaused, settings);
   }
 
   function handleModeSelect(mode) {
     setMode(mode);
-    reset(mode, runningStateRunning);
-  }
-
-  function getTimeFromMode(mode, settings) {
-    switch (mode) {
-      case 0:
-        return settings.pomodoro * oneMin;
-      case 1:
-        return settings.shortBreak * oneMin;
-      case 2:
-        return settings.longBreak * oneMin;
-    }
+    reset(mode, runningStateRunning, settings);
   }
 
   function getAlarmSound(soundName) {
@@ -125,51 +71,18 @@ function App() {
     // load settings from localStorage
     const savedSettings = localStorage.getItem("settings");
     if (savedSettings) {
-      setSettings(JSON.parse(savedSettings));
-
-      // Fresh loaded only: initialize the first timer if it's not started
-      setTimeState((s) => {
-        const oneMin = 60 * 1000;
-        if (
-          s.id === 0 &&
-          s.runningState === runningStatePaused &&
-          s.pauseTime > 0 &&
-          s.endTime - s.pauseTime === defPomodoroMins * oneMin
-        ) {
-          const now = setDateNow();
-          return {
-            id: 0,
-            runningState: runningStatePaused,
-            pauseTime: now,
-            endTime: now + JSON.parse(savedSettings).pomodoro * oneMin,
-          };
-        } else {
-          return s;
-        }
-      });
+      const loadedSettings = JSON.parse(savedSettings);
+      setSettings(loadedSettings);
+      setNeedReloadingPomodoro(true);
     }
   }, []);
 
   useEffect(() => {
-    if (timeState.runningState === runningStateRunning) {
-      const interval = setInterval(() => {
-        const dateNow = setDateNow();
-        setTimeState((s) => {
-          if (s.runningState === runningStateRunning) {
-            if (s.endTime <= dateNow) {
-              return {
-                ...s,
-                runningState: runningStateFinished,
-                endTime: dateNow,
-              };
-            }
-          }
-          return s;
-        });
-      }, 1000);
-      return () => clearInterval(interval);
+    if (needReloadingPomodoro && settings) {
+      setNeedReloadingPomodoro(false);
+      reloadPomodoro(settings);
     }
-  }, [timeState.runningState, timeState.id, timeState.endTime]);
+  }, [needReloadingPomodoro, reloadPomodoro, settings]);
 
   useEffect(() => {
     const audio = document.querySelector("#audio");
